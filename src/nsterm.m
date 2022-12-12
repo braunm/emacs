@@ -73,9 +73,9 @@ GNUstep port and post-20 update by Adrian Robert (arobert@cogsci.ucsd.edu)
 #include <IOSurface/IOSurface.h>
 #endif
 
-static EmacsMenu *dockMenu;
+EmacsMenu *dockMenu;
 #ifdef NS_IMPL_COCOA
-static EmacsMenu *mainMenu;
+EmacsMenu *mainMenu;
 #endif
 
 /* The last known monitor attributes list.  */

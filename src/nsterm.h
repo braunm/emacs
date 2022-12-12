@@ -662,6 +662,25 @@ enum ns_return_frame_mode
 
 /* ==========================================================================
 
+   File open/save panels
+   This and next override methods to handle keyboard input in panels.
+
+   ========================================================================== */
+
+@interface EmacsSavePanel : NSSavePanel
+{
+}
+@end
+@interface EmacsOpenPanel : NSOpenPanel
+{
+}
+@end
+
+
+
+
+/* ==========================================================================
+
    Images and stippling
 
    ========================================================================== */
@@ -762,7 +781,9 @@ enum ns_return_frame_mode
 
 extern NSArray *ns_send_types, *ns_return_types;
 extern NSString *ns_app_name;
-extern EmacsMenu *svcsMenu;
+extern EmacsMenu *mainMenu, *svcsMenu, *dockMenu;
+extern NSMenu *panelMenu;
+
 
 /* Apple removed the declaration, but kept the implementation.  */
 #if defined (NS_IMPL_COCOA)
@@ -808,7 +829,7 @@ struct ns_bitmap_record
   int height, width, depth;
 };
 
-#ifdef NS_IMPL_GNUSTEP
+//#ifdef NS_IMPL_GNUSTEP
 /* this extends font backend font */
 struct nsfont_info
 {
@@ -836,7 +857,7 @@ struct nsfont_info
   unsigned int **glyphs; /* map Unicode index to glyph */
   struct font_metrics **metrics;
 };
-#endif
+//#endif
 
 /* Initialized in ns_initialize_display_info ().  */
 struct ns_display_info
@@ -1382,5 +1403,16 @@ enum NSWindowTabbingMode
 #endif
 
 extern void mark_nsterm (void);
+
+/* XXX There are crash reports near calls to NSMakeRect, or that
+   otherwise involve rectangles, that seem to have started with
+   Catalina. Emacs code always calls it with ints, but given the way
+   that CGFloats work, it's possible that the casts are needed. Beyond
+   that, it's unclear why the code. */
+
+#define AQ_NSMakeRect(x, y, w, h)                       \
+  NSMakeRect( (EmacsCGFloat) x, (EmacsCGFloat) y,      \
+              (EmacsCGFloat) w, (EmacsCGFloat) h)
+
 
 #endif	/* HAVE_NS */

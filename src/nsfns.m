@@ -47,6 +47,7 @@ GNUstep port and post-20 update by Adrian Robert (arobert@cogsci.ucsd.edu)
 #ifdef NS_IMPL_COCOA
 #include <IOKit/graphics/IOGraphicsLib.h>
 #include "macfont.h"
+// #include <WebKit/WebKit.h>
 
 #if MAC_OS_X_VERSION_MAX_ALLOWED >= 120000
 #include <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
@@ -57,6 +58,8 @@ GNUstep port and post-20 update by Adrian Robert (arobert@cogsci.ucsd.edu)
 #endif
 
 #ifdef HAVE_NS
+
+NSMenu *panelMenu;
 
 static EmacsTooltip *ns_tooltip = nil;
 
@@ -1677,15 +1680,550 @@ nil, it defaults to the selected frame. */)
   return font;
 }
 
-DEFUN ("ns-popup-color-panel", Fns_popup_color_panel, Sns_popup_color_panel,
-       0, 1, "",
-       doc: /* Pop up the color panel.  */)
-     (Lisp_Object frame)
+
+// void
+// x_focus_frame (struct frame *f)
+// {
+//   struct ns_display_info *dpyinfo = FRAME_DISPLAY_INFO (f);
+
+//   if (dpyinfo->ns_focus_frame != f)
+//     {
+//       EmacsView *view = FRAME_NS_VIEW (f);
+//       block_input ();
+//       [NSApp activateIgnoringOtherApps: YES];
+//       [[view window] makeKeyAndOrderFront: view];
+//       unblock_input ();
+//     }
+// }
+
+// Lisp_Object
+// x_get_focus_frame (struct frame *frame)
+// {
+//   struct ns_display_info *dpyinfo = FRAME_DISPLAY_INFO (frame);
+//   Lisp_Object nsfocus;
+
+//   if (!dpyinfo->ns_focus_frame)
+//     return Qnil;
+
+//   XSETFRAME (nsfocus, dpyinfo->ns_focus_frame);
+//   return nsfocus;
+// }
+
+
+static NSScreen *
+ns_get_screen (Lisp_Object screen)
 {
-  check_window_system (NULL);
-  [NSApp orderFrontColorPanel: NSApp];
+  struct frame *f;
+  struct terminal *terminal;
+
+  if (EQ (Qt, screen)) /* not documented */
+    return [NSScreen mainScreen];
+
+  terminal = decode_live_terminal (screen);
+  if (terminal->type != output_ns)
+    return NULL;
+
+  if (NILP (screen))
+    f = SELECTED_FRAME ();
+  else if (FRAMEP (screen))
+    f = XFRAME (screen);
+  else
+    {
+      struct ns_display_info *dpyinfo = terminal->display_info.ns;
+      f = dpyinfo->ns_focus_frame
+        ? dpyinfo->ns_focus_frame : dpyinfo->highlight_frame;
+    }
+
+  return ((f && FRAME_NS_P (f)) ? [[FRAME_NS_VIEW (f) window] screen]
+	  : NULL);
+}
+
+
+
+
+DEFUN ("ns-cycle-frame", Fns_cycle_frame, Sns_cycle_frame, 0, 1, "",
+       doc: /* Select the next frame in order.
+arg nil means cycle forwards.  */)
+     (arg)
+     Lisp_Object arg;
+{
+  if ([NSApp respondsToSelector:@selector(_cycleWindowsReversed:)])
+  {
+    [NSApp _cycleWindowsReversed:(NILP(arg) ? FALSE : TRUE)];
+  }
   return Qnil;
 }
+
+
+DEFUN ("ns-visible-frame-list", Fns_visible_frame_list, Sns_visible_frame_list,
+       0, 0, 0,
+       doc: /* Return a list of all visible NS frames on the current space.  */)
+  (void)
+{
+  Lisp_Object tail, frame;
+  struct frame *f;
+  Lisp_Object value;
+
+  value = Qnil;
+  for (tail = Vframe_list; CONSP (tail); tail = XCDR (tail))
+    {
+      frame = XCAR (tail);
+      if (!FRAMEP (frame))
+	continue;
+      f = XFRAME (frame);
+      if (FRAME_VISIBLE_P (f)
+	  && FRAME_NS_P (f)
+	  && (! ([[FRAME_NS_VIEW (f) window] respondsToSelector:@selector(isOnActiveSpace)]) // (NSAppKitVersionNumber
+	      || [[FRAME_NS_VIEW (f) window] isOnActiveSpace]))
+	value = Fcons (frame, value);
+    }
+  return value;
+}
+
+DEFUN ("ns-frame-is-on-active-space-p", Fns_frame_is_on_active_space_p, Sns_frame_is_on_active_space_p,
+       0, 1, 0,
+       doc: /* Return non-nil if FRAME is on active space.
+OS X 10.6 only; returns non-nil prior to 10.5 or for non-NS frames.*/)
+  (frame)
+     Lisp_Object frame;
+{
+  struct frame *f;
+  check_window_system (NULL);
+  CHECK_LIVE_FRAME (frame);
+  f = XFRAME (frame);
+  NSWindow *win = [FRAME_NS_VIEW (f) window];
+  if (! ([win respondsToSelector:@selector(isOnActiveSpace)]) // (NSAppKitVersionNumber
+      || [win isOnActiveSpace])
+    return Qt;
+  return Qnil;
+}
+
+
+
+/* Spelling */
+
+DEFUN ("ns-popup-spellchecker-panel", Fns_popup_spellchecker_panel, Sns_popup_spellchecker_panel,
+       0, 0, "",
+       doc: /* Pop up the spell checking panel.
+Shows the NS spell checking panel and brings it to the front.*/)
+     (void)
+{
+  id sc;
+
+  check_window_system (NULL);
+  sc = [NSSpellChecker sharedSpellChecker];
+
+  block_input();
+  [[sc spellingPanel] orderFront: NSApp];
+
+  // Spelling panel should appear with previous content, not empty.
+  //  [sc updateSpellingPanelWithMisspelledWord:@""]; // no word, no spelling errors
+
+  // found here: http://trac.webkit.org/changeset/19670
+  // // FIXME 4811447: workaround for lack of API
+  //  	NSSpellChecker *spellChecker = [NSSpellChecker sharedSpellChecker];
+  // does not work
+  // if ([sc respondsToSelector:@selector(_updateGrammar)])
+  //   [sc performSelector:@selector(_updateGrammar)];
+  unblock_input();
+  return Qnil;
+}
+
+DEFUN ("ns-close-spellchecker-panel", Fns_close_spellchecker_panel, Sns_close_spellchecker_panel,
+       0, 0, "",
+       doc: /* Close the spell checking panel.*/)
+     (void)
+{
+  id sc;
+
+  check_window_system (NULL);
+  sc = [NSSpellChecker sharedSpellChecker];
+
+  block_input();
+  [[sc spellingPanel] close];
+
+  unblock_input();
+  return Qnil;
+}
+
+DEFUN ("ns-spellchecker-panel-visible-p", Fns_spellchecker_panel_visible_p, Sns_spellchecker_panel_visible_p,
+       0, 0, "",
+       doc: /* Return t if spellchecking panel is visible,
+nil otherwise.*/)
+     (void)
+{
+  id sc;
+  BOOL visible;
+
+  check_window_system (NULL);
+  sc = [NSSpellChecker sharedSpellChecker];
+
+  block_input();
+  visible = [[sc spellingPanel] isVisible];
+
+  unblock_input();
+  return visible ? Qt : Qnil;
+}
+
+
+DEFUN ("ns-spellchecker-show-word", Fns_spellchecker_show_word, Sns_spellchecker_show_word,
+       1, 1, 0,
+       doc: /* Show word WORD in the spellchecking panel.
+Give empty string to delete word.*/)
+     (str)
+     Lisp_Object str;
+{
+  id sc;
+
+  CHECK_STRING (str);
+  check_window_system (NULL);
+  block_input();
+  sc = [NSSpellChecker sharedSpellChecker];
+
+  [sc updateSpellingPanelWithMisspelledWord:[NSString stringWithUTF8String: SDATA (str)]]; // no word, no spelling errors
+
+  unblock_input();
+  return Qnil;
+}
+
+
+
+
+DEFUN ("ns-spellchecker-learn-word", Fns_spellchecker_learn_word, Sns_spellchecker_learn_word,
+       1, 1, 0,
+       doc: /* Learn word WORD.
+Returns learned word if successful.
+Not available on 10.4.*/)
+     (str)
+     Lisp_Object str;
+{
+  CHECK_STRING (str);
+  check_window_system (NULL);
+  block_input();
+  id sc = [NSSpellChecker sharedSpellChecker];
+
+#ifdef NS_IMPL_COCOA
+  if ([sc respondsToSelector:@selector(learnWord:)]) // (NSAppKitVersionNumber >= 824.0)
+    {
+
+      [sc learnWord:[NSString stringWithUTF8String: SDATA (str)]];
+      unblock_input();
+      return str;
+    }
+#endif
+  unblock_input();
+  return Qnil;
+}
+
+
+DEFUN ("ns-spellchecker-ignore-word", Fns_spellchecker_ignore_word, Sns_spellchecker_ignore_word,
+       1, 2, 0,
+       doc: /* Ignore word WORD in buffer BUFFER.*/)
+     (str, buffer)
+     Lisp_Object str, buffer;
+{
+  id sc;
+
+  CHECK_STRING (str);
+  check_window_system (NULL);
+  block_input();
+  sc = [NSSpellChecker sharedSpellChecker];
+
+  NSInteger tag = 1;
+  if (! NILP (buffer))
+    {
+      tag = sxhash (buffer);
+    }
+
+  [sc ignoreWord:[NSString stringWithUTF8String: SDATA (str)] inSpellDocumentWithTag:tag];
+  unblock_input();
+  return Qnil;
+}
+
+
+DEFUN ("ns-spellchecker-ignored-words", Fns_spellchecker_ignored_words, Sns_spellchecker_ignored_words,
+       1, 1, 0,
+       doc: /* Return list of words ignored by NSSpellChecker
+for buffer BUFFER */)
+     (buffer)
+     Lisp_Object buffer;
+{
+  id sc;
+
+  check_window_system (NULL);
+  block_input();
+  sc = [NSSpellChecker sharedSpellChecker];
+
+  NSInteger tag = 1;
+  if (! NILP (buffer))
+    {
+      tag = sxhash (buffer);
+    }
+
+  Lisp_Object retval = Qnil;
+  NSArray *words = [sc ignoredWordsInSpellDocumentWithTag:tag];
+  int arrayCount = [words count];
+  int i;
+  for (i = 0; i < arrayCount; i++) {
+    // build Lisp list of strings
+    retval = Fcons (build_string ([[words objectAtIndex:i] UTF8String]),
+		    retval);
+  }
+  unblock_input();
+  return retval;
+}
+
+
+DEFUN ("ns-spellchecker-check-spelling", Fns_spellchecker_check_spelling, Sns_spellchecker_check_spelling,
+       1, 2, 0,
+       doc: /* Check spelling of STRING
+Returns the location of the first misspelled word in a
+cons cell of form (beginning . length), or nil if all
+words are spelled as in the dictionary.*/)
+     (string, buffer)
+     Lisp_Object string, buffer;
+{
+  id sc;
+
+  CHECK_STRING (string);
+  check_window_system (NULL);
+  block_input();
+  sc = [NSSpellChecker sharedSpellChecker];
+
+  /*  NSRange first_word = nil;   // Invalid initializer!  NSRange is a struct */
+  NSInteger tag = 1;
+  if (! NILP (buffer) )
+    {
+      tag = sxhash (buffer);
+    }
+
+  /* unfinished -
+  if ([sc respondsToSelector:@selector(checkString:range:types:options:inSpellDocumentWithTag:orthography:wordCount:)])
+    {
+      NSString *nsString = [NSString stringWithUTF8String: SDATA (string)];
+      NSArray *spelling_result = [sc
+				   checkString:nsString
+					 range:NSMakeRange(0,[nsString size]-1)
+					 types:NSTextCheckingAllSystemTypes - NSTextCheckingTypeGrammar
+				       options:nil
+				     inSpellDocumentWithTag:tag
+				   orthography:nil // difficult to produce
+				     wordCount:nil];
+
+    } else */
+    // {
+
+      NSRange first_word =  [sc checkSpellingOfString:[NSString stringWithUTF8String: SDATA (string)] startingAt:((NSInteger) 0)
+					     language:nil wrap:NO inSpellDocumentWithTag:tag wordCount:nil];
+
+    // }
+  unblock_input();
+  if (first_word.location == NSNotFound || (int) first_word.location < 0)
+    return Qnil;
+  else
+    return Fcons (make_fixnum (first_word.location), make_fixnum (first_word.length));
+}
+
+
+DEFUN ("ns-spellchecker-check-grammar", Fns_spellchecker_check_grammar, Sns_spellchecker_check_grammar,
+       1, 2, 0,
+       doc: /* Check spelling of SENTENCE.
+BUFFER, if given, idenitifies the document containing list
+of ignored grammatical constructions. */)
+     (sentence, buffer)
+     Lisp_Object sentence, buffer;
+{
+  id sc;
+
+  CHECK_STRING (sentence);
+  check_window_system (NULL);
+  block_input();
+  sc = [NSSpellChecker sharedSpellChecker];
+
+  NSInteger tag = 1;
+  if (! NILP (buffer) )
+    {
+      tag = sxhash (buffer);
+    }
+
+  NSArray *errdetails;
+
+  /* to do: use long version */
+  NSRange first_word = [sc checkGrammarOfString: [NSString stringWithUTF8String: SDATA (sentence)] startingAt:((NSInteger) 0)
+				       language:nil wrap:NO inSpellDocumentWithTag:tag details:&errdetails];
+
+  unblock_input();
+  if (first_word.length == 0) // Is this how "no location" is indicated?
+    return Qnil;
+  else
+    return Fcons (make_fixnum ((int) first_word.location), make_fixnum ((int) first_word.length));
+}
+
+
+DEFUN ("ns-spellchecker-get-suggestions", Fns_spellchecker_get_suggestions, Sns_spellchecker_get_suggestions,
+       1, 1, 0,
+       doc: /* Get suggestions for WORD.
+If word contains all capital letters, or its first
+letter is capitalized, the suggested words are
+capitalized in the same way. */)
+     (word)
+     Lisp_Object word;
+{
+  id sc;
+
+  CHECK_STRING (word);
+  check_window_system (NULL);
+  block_input();
+  sc = [NSSpellChecker sharedSpellChecker];
+
+  Lisp_Object retval = Qnil;
+  NSString *the_word = [NSString stringWithUTF8String: SDATA (word)];
+  NSArray *guesses = [sc guessesForWordRange:NSMakeRange(0, [the_word length]) inString:the_word language:[sc language] inSpellDocumentWithTag:0];
+  int arrayCount = [guesses count];
+  int i = arrayCount;
+  while (--i >= 0)
+    retval = Fcons (build_string ([[guesses objectAtIndex:i] UTF8String]),
+		    retval);
+  unblock_input();
+  return retval;
+}
+
+
+DEFUN ("ns-spellchecker-list-languages", Fns_spellchecker_list_languages, Sns_spellchecker_list_languages,
+       0, 0, 0,
+       doc: /* Get all available spell-checking languages.
+Returns nil if not successful.*/)
+     (void)
+{
+  id sc;
+  Lisp_Object retval = Qnil;
+
+  check_window_system (NULL);
+  block_input();
+  sc = [NSSpellChecker sharedSpellChecker];
+
+#ifdef NS_IMPL_COCOA
+  if ([sc respondsToSelector:@selector(availableLanguages)]) // (NSAppKitVersionNumber >= 824.0)
+    {
+      NSArray *langs = [sc availableLanguages];
+      int arrayCount = [langs count];
+      int i;
+      for (i = 0; i < arrayCount; i++) {
+	// build Lisp list of strings
+	retval = Fcons (build_string ([[langs objectAtIndex:i] UTF8String]),
+			retval);
+      }
+    }
+#endif
+  unblock_input();
+  return retval;
+}
+
+
+DEFUN ("ns-spellchecker-current-language", Fns_spellchecker_current_language, Sns_spellchecker_current_language,
+       0, 0, 0,
+       doc: /* Get the current spell-checking language.*/)
+     (void)
+{
+  id sc;
+
+  check_window_system (NULL);
+  block_input();
+  sc = [NSSpellChecker sharedSpellChecker];
+
+  Lisp_Object retval = Qnil;
+  NSString *lang = [sc language];
+  retval = build_string ([lang UTF8String]);
+
+  unblock_input();
+  return retval;
+}
+
+
+DEFUN ("ns-spellchecker-set-language", Fns_spellchecker_set_language, Sns_spellchecker_set_language,
+       1, 1, 0,
+       doc: /* Set spell-checking language.
+LANGUAGE must be one of the languages returned by
+`ns-spellchecker-list-langauges'.*/)
+     (language)
+     Lisp_Object language;
+{
+  id sc;
+
+  CHECK_STRING (language);
+  check_window_system (NULL);
+  block_input();
+  sc = [NSSpellChecker sharedSpellChecker];
+
+  [sc setLanguage: [NSString stringWithUTF8String: SDATA (language)]];
+  unblock_input();
+  return Qnil;
+}
+
+
+
+
+DEFUN ("ns-popup-font-panel", Fns_popup_font_panel, Sns_popup_font_panel,
+       0, 2, "",
+       doc: /* Pop up the font panel. */)
+     (frame, face)
+     Lisp_Object frame, face;
+{
+  struct frame *f = decode_window_system_frame (frame);
+  id fm = [NSFontManager sharedFontManager];
+
+  check_window_system (NULL);
+  block_input();
+
+  fm = [NSFontManager sharedFontManager];
+  struct font *font = f->output_data.ns->font;
+  NSFont *nsfont;
+#ifdef NS_IMPL_GNUSTEP
+  nsfont = ((struct nsfont_info *)font)->nsfont;
+#endif
+#ifdef NS_IMPL_COCOA
+  nsfont = (NSFont *) macfont_get_nsctfont (font);
+#endif
+
+  // given font
+  if (! NILP (face))
+    {
+      int face_id = lookup_named_face (NULL, f, face, 1);
+      if (face_id)
+	{
+	  struct face *face = FACE_FROM_ID (f, face_id);
+	  if (face)
+	    {
+	      if (EQ (face->font->driver->type, Qns))
+		nsfont = ((struct nsfont_info *)face->font)->nsfont;
+	      else
+		nsfont = (NSFont *) macfont_get_nsctfont (face->font);
+	    }
+	}
+    }
+  [fm setSelectedFont: nsfont isMultiple: NO];
+  [fm orderFrontFontPanel: NSApp];
+
+  unblock_input();
+  return Qnil;
+}
+
+
+
+// extern void ns_update_menubar (struct frame *f, bool deep_p, EmacsMenu *submenu);
+
+
+
+
+
+#ifdef NS_IMPL_COCOA
+#if MAC_OS_X_VERSION_MAX_ALLOWED > MAC_OS_X_VERSION_10_9
+#define MODAL_OK_RESPONSE NSModalResponseOK
+#endif
+#endif
+#ifndef MODAL_OK_RESPONSE
+#define MODAL_OK_RESPONSE NSOKButton
+#endif
 
 static struct
 {
@@ -1696,6 +2234,133 @@ static struct
   BOOL no_types;
 #endif
 } ns_fd_data;
+
+
+DEFUN ("ns-read-file-name", Fns_read_file_name, Sns_read_file_name, 1, 5, 0,
+       doc: /* Use a graphical panel to read a file name, using prompt PROMPT.
+Optional arg DIR, if non-nil, supplies a default directory.
+Optional arg MUSTMATCH, if non-nil, means the returned file or
+directory must exist.
+Optional arg INIT, if non-nil, provides a default file name to use.
+Optional arg DIR_ONLY_P, if non-nil, means choose only directories.  */)
+  (Lisp_Object prompt, Lisp_Object dir, Lisp_Object mustmatch,
+   Lisp_Object init, Lisp_Object dir_only_p)
+{
+  static id fileDelegate = nil;
+  BOOL isSave = NILP (mustmatch) && NILP (dir_only_p);
+  id panel;
+  Lisp_Object fname = Qnil;
+
+  NSString *promptS = NILP (prompt) || !STRINGP (prompt) ? nil :
+    [NSString stringWithUTF8String: SSDATA (prompt)];
+  NSString *dirS = NILP (dir) || !STRINGP (dir) ?
+    [NSString stringWithUTF8String: SSDATA (BVAR (current_buffer, directory))] :
+    [NSString stringWithUTF8String: SSDATA (dir)];
+  NSString *initS = NILP (init) || !STRINGP (init) ? nil :
+    [NSString stringWithUTF8String: SSDATA (init)];
+  NSEvent *nxev;
+
+  check_window_system (NULL);
+
+  if (fileDelegate == nil)
+    fileDelegate = [EmacsFileDelegate new];
+
+  [NSCursor setHiddenUntilMouseMoves: NO];
+
+  if ([dirS characterAtIndex: 0] == '~')
+    dirS = [dirS stringByExpandingTildeInPath];
+
+  panel = isSave ?
+    (id)[EmacsSavePanel savePanel] : (id)[EmacsOpenPanel openPanel];
+
+  [panel setTitle: promptS];
+
+  [panel setAllowsOtherFileTypes: YES];
+  [panel setTreatsFilePackagesAsDirectories: YES];
+  /* must provide - users will have a hard time switching this off otherwise */
+  [panel setCanSelectHiddenExtension:NO];
+  [panel setExtensionHidden:NO];
+  [panel setDelegate: fileDelegate];
+
+  if (! NILP (dir_only_p))
+    {
+      [panel setCanChooseDirectories: YES];
+      [panel setCanChooseFiles: NO];
+    }
+  else if (! isSave)
+    {
+      /* This is not quite what the documentation says, but it is compatible
+         with the Gtk+ code.  Also, the menu entry says "Open File...".  */
+      [panel setCanChooseDirectories: NO];
+      [panel setCanChooseFiles: YES];
+    }
+
+  block_input ();
+  ns_fd_data.panel = panel;
+  ns_fd_data.ret = NO;
+#ifdef NS_IMPL_COCOA
+  if (! NILP (mustmatch) || ! NILP (dir_only_p))
+    [panel setAllowedFileTypes: nil];
+  if (dirS) [panel setDirectoryURL: [NSURL fileURLWithPath: dirS]];
+  if (initS && NILP (Ffile_directory_p (init)))
+    [panel setNameFieldStringValue: [initS lastPathComponent]];
+  else
+    [panel setNameFieldStringValue: @""];
+
+#else
+  ns_fd_data.no_types = NILP (mustmatch) && NILP (dir_only_p);
+  ns_fd_data.dirS = dirS;
+  ns_fd_data.initS = initS;
+#endif
+
+  /* runModalForDirectory/runModal restarts the main event loop when done,
+     so we must start an event loop and then pop up the file dialog.
+     The file dialog may pop up a confirm dialog after Ok has been pressed,
+     so we can not simply pop down on the Ok/Cancel press.
+   */
+  nxev = [NSEvent otherEventWithType: NSApplicationDefined
+                            location: NSMakePoint (0, 0)
+                       modifierFlags: 0
+                           timestamp: 0
+                        windowNumber: [[NSApp mainWindow] windowNumber]
+                             context: [NSApp context]
+                             subtype: 0
+                               data1: 0
+                               data2: NSAPP_DATA2_RUNFILEDIALOG];
+
+  [NSApp postEvent: nxev atStart: NO];
+
+  while (ns_fd_data.panel != nil)
+	  [NSApp performSelectorOnMainThread:@selector(run)
+					 withObject:nil
+				      waitUntilDone:YES];
+
+  if (ns_fd_data.ret == MODAL_OK_RESPONSE)
+    {
+      NSString *str = ns_filename_from_panel (panel);
+      if (! str) str = ns_directory_from_panel (panel);
+      if (str) fname = build_string ([str UTF8String]);
+    }
+
+  [[FRAME_NS_VIEW (SELECTED_FRAME ()) window] makeKeyWindow];
+  unblock_input ();
+
+  return fname;
+}
+
+
+
+
+DEFUN ("ns-popup-color-panel", Fns_popup_color_panel, Sns_popup_color_panel,
+       0, 1, "",
+       doc: /* Pop up the color panel.  */)
+     (Lisp_Object frame)
+{
+  check_window_system (NULL);
+  [NSApp orderFrontColorPanel: NSApp];
+  return Qnil;
+}
+
 
 void
 ns_run_file_dialog (void)
@@ -1730,132 +2395,7 @@ ns_run_file_dialog (void)
 #define MODAL_OK_RESPONSE NSOKButton
 #endif
 
-DEFUN ("ns-read-file-name", Fns_read_file_name, Sns_read_file_name, 1, 5, 0,
-       doc: /* Use a graphical panel to read a file name, using prompt PROMPT.
-Optional arg DIR, if non-nil, supplies a default directory.
-Optional arg MUSTMATCH, if non-nil, means the returned file or
-directory must exist.
-Optional arg INIT, if non-nil, provides a default file name to use.
-Optional arg DIR-ONLY-P, if non-nil, means choose only directories.  */)
-  (Lisp_Object prompt, Lisp_Object dir, Lisp_Object mustmatch,
-   Lisp_Object init, Lisp_Object dir_only_p)
-{
-  static id fileDelegate = nil;
-  BOOL isSave = NILP (mustmatch) && NILP (dir_only_p);
-  id panel;
-  Lisp_Object fname = Qnil;
-  NSString *promptS, *dirS, *initS, *str;
-  NSEvent *nxev;
 
-  promptS = (NILP (prompt) || !STRINGP (prompt)
-	     ? nil : [NSString stringWithLispString: prompt]);
-  dirS = (NILP (dir) || !STRINGP (dir)
-	  ? [NSString stringWithLispString:
-			ENCODE_FILE (BVAR (current_buffer, directory))] :
-	  [NSString stringWithLispString: ENCODE_FILE (dir)]);
-  initS = (NILP (init) || !STRINGP (init)
-	   ? nil : [NSString stringWithLispString: init]);
-
-  check_window_system (NULL);
-
-  if (fileDelegate == nil)
-    fileDelegate = [EmacsFileDelegate new];
-
-  [NSCursor setHiddenUntilMouseMoves: NO];
-
-  if ([dirS characterAtIndex: 0] == '~')
-    dirS = [dirS stringByExpandingTildeInPath];
-
-  panel = isSave ?
-    (id)[NSSavePanel savePanel] : (id)[NSOpenPanel openPanel];
-
-  [panel setTitle: promptS];
-
-  [panel setAllowsOtherFileTypes: YES];
-  [panel setTreatsFilePackagesAsDirectories: YES];
-  [panel setDelegate: fileDelegate];
-
-  if (! NILP (dir_only_p))
-    {
-      [panel setCanChooseDirectories: YES];
-      [panel setCanChooseFiles: NO];
-    }
-  else if (! isSave)
-    {
-      /* This is not quite what the documentation says, but it is compatible
-         with the Gtk+ code.  Also, the menu entry says "Open File...".  */
-      [panel setCanChooseDirectories: NO];
-      [panel setCanChooseFiles: YES];
-    }
-
-  block_input ();
-  ns_fd_data.panel = panel;
-  ns_fd_data.ret = NO;
-#ifdef NS_IMPL_COCOA
-  if (! NILP (mustmatch) || ! NILP (dir_only_p))
-    {
-#if MAC_OS_X_VERSION_MAX_ALLOWED >= 120000
-#if MAC_OS_X_VERSION_MIN_REQUIRED < 120000
-      if ([panel respondsToSelector: @selector (setAllowedContentTypes:)])
-#endif
-	[panel setAllowedContentTypes: [NSArray array]];
-#if MAC_OS_X_VERSION_MIN_REQUIRED < 120000
-      else
-#endif
-#endif
-#if MAC_OS_X_VERSION_MIN_REQUIRED < 120000
-	[panel setAllowedFileTypes: nil];
-#endif
-    }
-  if (dirS) [panel setDirectoryURL: [NSURL fileURLWithPath: dirS]];
-  if (initS && NILP (Ffile_directory_p (init)))
-    [panel setNameFieldStringValue: [initS lastPathComponent]];
-  else
-    [panel setNameFieldStringValue: @""];
-
-#else
-  ns_fd_data.no_types = NILP (mustmatch) && NILP (dir_only_p);
-  ns_fd_data.dirS = dirS;
-  ns_fd_data.initS = initS;
-#endif
-
-  /* runModalForDirectory/runModal restarts the main event loop when done,
-     so we must start an event loop and then pop up the file dialog.
-     The file dialog may pop up a confirm dialog after Ok has been pressed,
-     so we can not simply pop down on the Ok/Cancel press.
-   */
-  nxev = [NSEvent otherEventWithType: NSEventTypeApplicationDefined
-                            location: NSMakePoint (0, 0)
-                       modifierFlags: 0
-                           timestamp: 0
-                        windowNumber: [[NSApp mainWindow] windowNumber]
-                             context: [NSApp context]
-                             subtype: 0
-                               data1: 0
-                               data2: NSAPP_DATA2_RUNFILEDIALOG];
-
-  [NSApp postEvent: nxev atStart: NO];
-  while (ns_fd_data.panel != nil)
-    [NSApp run];
-
-  if (ns_fd_data.ret == MODAL_OK_RESPONSE)
-    {
-      str = ns_filename_from_panel (panel);
-
-      if (!str)
-	str = ns_directory_from_panel (panel);
-      if (str)
-	fname = [str lispString];
-
-      if (!NILP (fname))
-	fname = DECODE_FILE (fname);
-    }
-
-  [[FRAME_NS_VIEW (SELECTED_FRAME ()) window] makeKeyWindow];
-  unblock_input ();
-
-  return fname;
-}
 
 const char *
 ns_get_defaults_value (const char *key)
@@ -2830,6 +3370,38 @@ Internal use only, use `display-monitor-attributes-list' instead.  */)
   return attributes_list;
 }
 
+DEFUN ("display-usable-bounds", Fns_display_usable_bounds,
+       Sns_display_usable_bounds, 0, 1, 0,
+       doc: /* Return the bounds of the usable part of the screen.
+The return value is a list of integers (LEFT TOP WIDTH HEIGHT), which
+are the boundaries of the usable part of the screen, excluding areas
+reserved for the Mac menu, dock, and so forth.
+
+The screen queried corresponds to DISPLAY, which should be either a
+frame, a display name (a string), or terminal ID.  If omitted or nil,
+that stands for the selected frame's display.  If t, the main display is used.
+
+May return nil if a frame passed in DISPLAY is not on any available display.  */)
+     (display)
+     Lisp_Object display;
+{
+  NSScreen *screen;
+  NSRect vScreen;
+
+  check_ns_display_info (display);
+  screen = ns_get_screen (display);
+  if (!screen)
+    return Qnil;
+
+  vScreen = [screen visibleFrame];
+
+  /* NS coordinate system is upside-down.
+     Transform to screen-specific coordinates. */
+  return list4i (vScreen.origin.x,
+		 [screen frame].size.height
+		 - vScreen.size.height - vScreen.origin.y,
+		 vScreen.size.width, vScreen.size.height);
+}
 
 DEFUN ("x-display-planes", Fx_display_planes, Sx_display_planes,
        0, 1, 0,
@@ -3753,6 +4325,127 @@ DEFUN ("ns-show-character-palette",
 
    ========================================================================== */
 
+/*
+  Handle arrow/function/control keys and copy/paste/cut in file dialogs.
+  Return YES if handled, NO if not.
+ */
+static BOOL
+handlePanelKeys (NSSavePanel *panel, NSEvent *theEvent)
+{
+  NSString *s;
+  int i;
+  BOOL ret = NO;
+
+  return NO;
+  if ([theEvent type] != NSKeyDown) return NO;
+  s = [theEvent characters];
+
+  for (i = 0; i < [s length]; ++i)
+    {
+      int ch = (int) [s characterAtIndex: i];
+      switch (ch)
+        {
+        case NSHomeFunctionKey:
+        case NSDownArrowFunctionKey:
+        case NSUpArrowFunctionKey:
+        case NSLeftArrowFunctionKey:
+        case NSRightArrowFunctionKey:
+        case NSPageUpFunctionKey:
+        case NSPageDownFunctionKey:
+        case NSEndFunctionKey:
+          /* Don't send command modified keys, as those are handled in the
+             performKeyEquivalent method of the super class.
+          */
+          if (! ([theEvent modifierFlags] & NSCommandKeyMask))
+            {
+              [panel sendEvent: theEvent];
+              ret = YES;
+            }
+          break;
+          /* As we don't have the standard key commands for
+             copy/paste/cut/select-all in our edit menu, we must handle
+             them here.  TODO: handle Emacs key bindings for copy/cut/select-all
+             here, paste works, because we have that in our Edit menu.
+             I.e. refactor out code in nsterm.m, keyDown: to figure out the
+             correct modifier.
+          */
+        case 'x': // Cut
+        case 'c': // Copy
+        case 'v': // Paste
+        case 'a': // Select all
+          if ([theEvent modifierFlags] & NSCommandKeyMask)
+            {
+              [NSApp sendAction:
+                       (ch == 'x'
+                        ? @selector(cut:)
+                        : (ch == 'c'
+                           ? @selector(copy:)
+                           : (ch == 'v'
+                              ? @selector(paste:)
+                              : @selector(selectAll:))))
+                             to:nil from:panel];
+              ret = YES;
+            }
+        default:
+          // Send all control keys, as the text field supports C-a, C-f, C-e
+          // C-b and more.
+          if ([theEvent modifierFlags] & NSControlKeyMask)
+            {
+              [panel sendEvent: theEvent];
+              ret = YES;
+            }
+          break;
+        }
+    }
+
+
+  return ret;
+}
+
+@implementation EmacsSavePanel
+#ifdef NS_IMPL_COCOA
+
+- (void)becomeKeyWindow
+{
+  [super becomeKeyWindow];
+  [NSApp setMainMenu: [panelMenu retain]];
+
+}
+
+#endif
+- (NSString *) getFilename
+{
+  return ns_filename_from_panel (self);
+}
+- (NSString *) getDirectory
+{
+  return ns_directory_from_panel (self);
+}
+
+- (BOOL)performKeyEquivalent:(NSEvent *)theEvent
+{
+  BOOL ret = handlePanelKeys (self, theEvent);
+  if (! ret)
+    ret = [super performKeyEquivalent:theEvent];
+  return ret;
+}
+@end
+
+
+@implementation EmacsOpenPanel
+- (BOOL)performKeyEquivalent:(NSEvent *)theEvent
+{
+  // NSOpenPanel inherits NSSavePanel, so passing self is OK.
+  BOOL ret = handlePanelKeys (self, theEvent);
+  if (! ret)
+    ret = [super performKeyEquivalent:theEvent];
+  return ret;
+}
+@end
+
+
+
+
 @implementation EmacsFileDelegate
 /* --------------------------------------------------------------------------
    Delegate methods for Open/Save panels
@@ -3944,6 +4637,8 @@ Default is t.  */);
   defsubr (&Sns_display_monitor_attributes_list);
   defsubr (&Sns_frame_geometry);
   defsubr (&Sns_frame_edges);
+
+
   defsubr (&Sns_frame_list_z_order);
   defsubr (&Sns_frame_restack);
   defsubr (&Sns_set_mouse_absolute_pixel_position);
@@ -3961,14 +4656,36 @@ Default is t.  */);
   defsubr (&Sx_open_connection);
   defsubr (&Sx_close_connection);
   defsubr (&Sx_display_list);
+  defsubr (&Sns_display_usable_bounds);
+
 
   defsubr (&Sns_hide_others);
   defsubr (&Sns_hide_emacs);
   defsubr (&Sns_emacs_info_panel);
   defsubr (&Sns_list_services);
   defsubr (&Sns_perform_service);
-  defsubr (&Sx_select_font);
+  defsubr (&Sns_cycle_frame);
+  defsubr (&Sns_visible_frame_list);
+  defsubr (&Sns_frame_is_on_active_space_p);
+  defsubr (&Sns_popup_spellchecker_panel);
+  defsubr (&Sns_close_spellchecker_panel);
+  defsubr (&Sns_spellchecker_panel_visible_p);
+  defsubr (&Sns_spellchecker_learn_word);
+  defsubr (&Sns_spellchecker_ignore_word);
+  defsubr (&Sns_spellchecker_ignored_words);
+  defsubr (&Sns_spellchecker_show_word);
+  defsubr (&Sns_spellchecker_check_spelling);
+  defsubr (&Sns_spellchecker_check_grammar);
+  defsubr (&Sns_spellchecker_get_suggestions);
+  defsubr (&Sns_spellchecker_list_languages);
+  defsubr (&Sns_spellchecker_current_language);
+  defsubr (&Sns_spellchecker_set_language);
+  defsubr (&Sns_popup_font_panel);
   defsubr (&Sns_popup_color_panel);
+
+
+  defsubr (&Sx_select_font);
+
 
   defsubr (&Sx_show_tip);
   defsubr (&Sx_hide_tip);
