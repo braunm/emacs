@@ -1,3 +1,4 @@
+
 /* Window definitions for GNU Emacs.
    Copyright (C) 1985-1986, 1993, 1995, 1997-2022 Free Software
    Foundation, Inc.
