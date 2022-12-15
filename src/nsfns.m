@@ -4319,6 +4319,30 @@ DEFUN ("ns-show-character-palette",
   return Qnil;
 }
 
+DEFUN ("ns-open-help-anchor", Fns_open_help_anchor, Sns_open_help_anchor, 1, 2, 0,
+       doc: /* Show Apple Help  */)
+     (anchor, book)
+     Lisp_Object anchor, book;
+{
+  check_window_system (NULL);
+  block_input();
+  CHECK_STRING (anchor);
+
+  if (! NILP (book) )
+    CHECK_STRING (book);
+
+  [[NSHelpManager sharedHelpManager] openHelpAnchor:[NSString stringWithUTF8String:
+								SDATA (anchor)]
+					     inBook:(NILP (book) ? nil :
+						     [NSString stringWithUTF8String:
+								 SDATA (book)])];
+  unblock_input();
+  return Qnil;
+}
+
+
+
+
 /* ==========================================================================
 
     Class implementations
@@ -4683,6 +4707,7 @@ Default is t.  */);
   defsubr (&Sns_popup_font_panel);
   defsubr (&Sns_popup_color_panel);
 
+  defsubr (&Sns_open_help_anchor);
 
   defsubr (&Sx_select_font);
 
