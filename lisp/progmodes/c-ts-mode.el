@@ -83,6 +83,14 @@ follows the form of `treesit-simple-indent-rules'."
     table)
   "Syntax table for `c-ts-mode'.")
 
+(defvar c++-ts-mode--syntax-table
+  (let ((table (make-syntax-table c-ts-mode--syntax-table)))
+    ;; Template delimiters.
+    (modify-syntax-entry ?<  "("     table)
+    (modify-syntax-entry ?>  ")"     table)
+    table)
+  "Syntax table for `c++-ts-mode'.")
+
 (defun c-ts-mode--indent-styles (mode)
   "Indent rules supported by `c-ts-mode'.
 MODE is either `c' or `cpp'."
@@ -120,6 +128,8 @@ MODE is either `c' or `cpp'."
            ((query "(call_expression arguments: (_) @indent)") parent c-ts-mode-indent-offset)
            ((parent-is "call_expression") parent 0)
            ((parent-is "enumerator_list") parent-bol c-ts-mode-indent-offset)
+           ,@(when (eq mode 'cpp)
+               '(((node-is "access_specifier") parent-bol 0)))
            ((parent-is "field_declaration_list") parent-bol c-ts-mode-indent-offset)
            ((parent-is "initializer_list") parent-bol c-ts-mode-indent-offset)
            ((parent-is "if_statement") parent-bol c-ts-mode-indent-offset)
@@ -251,7 +261,9 @@ MODE is either `c' or `cpp'."
    :language mode
    :feature 'string
    `((string_literal) @font-lock-string-face
-     (system_lib_string) @font-lock-string-face)
+     (system_lib_string) @font-lock-string-face
+     ,@(when (eq mode 'cpp)
+         '((raw_string_literal) @font-lock-string-face)))
 
    :language mode
    :feature 'literal
@@ -551,7 +563,8 @@ the subtrees."
                             "type_definition"
                             "struct_specifier"
                             "enum_specifier"
-                            "union_specifier")))
+                            "union_specifier"
+                            "class_specifier")))
 
   ;; Nodes like struct/enum/union_specifier can appear in
   ;; function_definitions, so we need to find the top-level node.
@@ -612,6 +625,7 @@ the subtrees."
 (define-derived-mode c++-ts-mode c-ts-base-mode "C++"
   "Major mode for editing C++, powered by tree-sitter."
   :group 'c++
+  :syntax-table c++-ts-mode--syntax-table
 
   (unless (treesit-ready-p 'cpp)
     (error "Tree-sitter for C++ isn't available"))

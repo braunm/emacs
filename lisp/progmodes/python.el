@@ -993,7 +993,8 @@ It makes underscores and dots word constituent chars.")
 
 (defvar python--treesit-operators
   '("-" "-=" "!=" "*" "**" "**=" "*=" "/" "//" "//=" "/=" "&" "%" "%="
-    "^" "+" "+=" "<" "<<" "<=" "<>" "=" "==" ">" ">=" ">>" "|" "~" "@" "@="))
+    "^" "+" "->" "+=" "<" "<<" "<=" "<>" "=" ":=" "==" ">" ">=" ">>" "|"
+    "~" "@" "@="))
 
 (defvar python--treesit-special-attributes
   '("__annotations__" "__closure__" "__code__"
@@ -6618,6 +6619,7 @@ implementations: `python-mode' and `python-ts-mode'."
   "Major mode for editing Python files, using tree-sitter library.
 
 \\{python-ts-mode-map}"
+  :syntax-table python-mode-syntax-table
   (when (treesit-ready-p 'python)
     (treesit-parser-create 'python)
     (setq-local treesit-font-lock-feature-list
