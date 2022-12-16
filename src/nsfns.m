@@ -47,7 +47,8 @@ GNUstep port and post-20 update by Adrian Robert (arobert@cogsci.ucsd.edu)
 #ifdef NS_IMPL_COCOA
 #include <IOKit/graphics/IOGraphicsLib.h>
 #include "macfont.h"
-// #include <WebKit/WebKit.h>
+#include <WebKit/WebKit.h>
+#include <PDFKit/PDFKit.h>
 
 #if MAC_OS_X_VERSION_MAX_ALLOWED >= 120000
 #include <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
@@ -2397,6 +2398,9 @@ ns_run_file_dialog (void)
 
 
 
+
+
+
 const char *
 ns_get_defaults_value (const char *key)
 {
@@ -4592,6 +4596,321 @@ ns_move_tooltip_to_mouse_location (NSPoint screen_point)
 	     display: YES];
 }
 
+
+/* ==========================================================================
+
+    Printing functions?
+
+   ========================================================================== */
+
+
+DEFUN ("ns-popup-page-setup-panel", Fns_popup_page_setup_panel, Sns_popup_page_setup_panel,
+       0, 0, "",
+       doc: /* Pop up the page setup panel.  */)
+     (void)
+{
+  check_window_system (NULL);
+  block_input();
+
+  NSPageLayout *pageLayout = [NSPageLayout pageLayout];
+
+  [pageLayout beginSheetWithPrintInfo:[NSPrintInfo sharedPrintInfo]
+		       modalForWindow:[FRAME_NS_VIEW (SELECTED_FRAME ()) window] /* not right. */
+			     delegate:FRAME_NS_VIEW (SELECTED_FRAME ())
+		       didEndSelector:@selector(pageLayoutDidEnd:returnCode:contextInfo:)
+			  contextInfo:nil];
+
+  /* runModal doesn't work for some reason, even though
+     it would be the right thing to do.  Use the technique from ns_popup_dialog?
+     can't get at the pageLayout window, which we'd need for that. */
+
+  // [pageLayout runModal];
+
+  // [[FRAME_NS_VIEW (SELECTED_FRAME ()) window] makeKeyWindow];
+  unblock_input();
+  return Qnil;
+}
+
+DEFUN ("aquamacs-html-to-rtf", Faquamacs_html_to_rtf,
+       Saquamacs_html_to_rtf, 1, 1, 0,
+       doc: /* Converts HTML to RTF.
+Available in Aquamacs only. */)
+     (Lisp_Object str)
+{
+  Lisp_Object result = Qnil;
+  /* convert HTML to RTF for formatting */
+  NSData *htmlData = [[NSString stringWithUTF8String: SDATA (str)]
+		       dataUsingEncoding:NSUTF8StringEncoding];
+
+  NSAttributedString *attrString = [[NSAttributedString alloc]
+					   initWithHTML:htmlData
+						options:@{NSTextEncodingNameDocumentOption: @"UTF-8"}
+                                     documentAttributes:NULL];
+
+  if (attrString)
+    {
+      NSData *rtfData = [attrString RTFFromRange: NSMakeRange(0,[attrString length])
+			      documentAttributes: @{NSDocumentTypeDocumentAttribute: NSRTFTextDocumentType}];
+      if (rtfData)
+	{
+	  if ([rtfData length] > 0)
+	    {
+	      result = make_string_from_bytes ((char *) [rtfData bytes], 1, [rtfData length]);
+	    }
+	  else
+	    result = Qnil;
+	}
+      else
+	error ("aquamacs-html-to-rtf: Generating RTF failed.");
+    }
+  else
+    error ("aquamacs-html-to-rtf: Parsing HTML failed.");
+  return result;
+}
+
+
+// DEFUN ("aquamacs-render-to-pdf", Faquamacs_render_to_pdf, Saquamacs_render_to_pdf,
+//        0, 3, "",
+//        doc: /* Render HTML buffer SOURCE to PDF.
+// If successful, resulting PDF (and the input HTML) are put
+// on the pasteboard.*/)
+//      (source, width, height)
+//      Lisp_Object source, width, height;
+// {
+//   struct frame *f;
+//   check_window_system (NULL);
+//   CHECK_FIXNAT(width);
+//   CHECK_FIXNAT(height);
+//   if (! BUFFERP (source))
+//     {
+//      error ("Must give buffer as source for aquamacs-render-to-pdf.");
+//     }
+
+//   block_input();
+
+//   WKWebView *htmlPage = [[WKWebView alloc] initWithFrame:AQ_NSMakeRect(0,0,XFIXNUM_RAW (width),XFIXNUM_RAW (height))
+// 					   frameName:@"myFrame"
+// 					   groupName:@"myGroup"];
+
+//   /* Render HTML */
+//   struct buffer *old_buffer = NULL;
+//   if (XBUFFER (source) != current_buffer)
+//     {
+//       old_buffer = current_buffer;
+//       set_buffer_internal_1 (XBUFFER (source));
+//     }
+//   Lisp_Object string = make_buffer_string (BEGV, ZV, 0);
+//   if (old_buffer)
+//     set_buffer_internal_1 (old_buffer);
+
+//   [[htmlPage mainFrame] loadHTMLString:
+// 	[NSString stringWithUTF8String: SDATA (string)] /* is copied */
+// 			       baseURL:[NSURL fileURLWithPath: [[NSBundle mainBundle] resourcePath]]];
+
+//   /* In this case, let's just wait until it's finished. */
+//   double current_time = [[NSDate date] timeIntervalSinceReferenceDate];
+//   while ([htmlPage  estimatedProgress] > 0.00) {
+//     if ([[NSDate date] timeIntervalSinceReferenceDate] - current_time >= .6)
+//       break;
+//     [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
+//   }
+//   if ([htmlPage  estimatedProgress] > 0.00)
+//     {
+//       unblock_input();
+//       [htmlPage release];
+//       error ("Rendering failed (timeout).");
+//     }
+
+//   //get the rect for the rendered frame
+//   NSRect webFrameRect = [[[[htmlPage mainFrame] frameView] documentView] frame];
+//   //get the rect of the current webview
+//   NSRect webViewRect = [htmlPage frame];
+
+//   //calculate the new frame
+//   NSRect newWKWebViewRect = AQ_NSMakeRect(webViewRect.origin.x,
+//                                         webViewRect.origin.y - (NSHeight(webFrameRect) - NSHeight(webViewRect)),
+// 				     NSWidth(webViewRect),
+// 				     NSHeight(webFrameRect));
+//   //set the frame
+//   [htmlPage setFrame:newWKWebViewRect];
+
+//   NSRect bounds = [[[[htmlPage mainFrame]frameView]documentView]
+// 	     bounds];
+
+// 	/* Alternative way of doing this, via Javascript ...
+//   NSString *actualHeightStr = [htmlPage stringByEvaluatingJavaScriptFromString:@"(function(){var a=document.body,b=document.documentElement;return Math.max(a.scrollHeight,b.scrollHeight)})();"];
+//   int actualHeight = [actualHeightStr integerValue];
+//   NSString *actualWidthStr = [htmlPage stringByEvaluatingJavaScriptFromString:@"(function(){var a=document.body,b=document.documentElement;return Math.max(a.scrollWidth,b.scrollWidth)})();"];
+//   int actualWidth = [actualWidthStr integerValue];
+//   NSLog(actualWidthStr);
+//   NSLog(actualHeightStr);
+//   if (actualHeight > 0) // JS above worked as intended
+//     {
+//       bounds.size.height = actualHeight;
+//     }
+//   if (actualWidth > 0) // JS above worked as intended
+//     {
+//       bounds.size.width = actualWidth;
+//     }
+
+//   */
+
+//   /* Note: we could also just use writePDFInsideRect:toPasteboard:
+//      but we're concurrently writing HTML as well. */
+
+//   NSData *viewImageData=[[[[htmlPage mainFrame] frameView] documentView]
+// 			  dataWithPDFInsideRect:bounds];
+//   PDFDocument *pdf = [[PDFDocument alloc] initWithData:viewImageData];
+//   NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
+//   [pasteboard clearContents];
+//   [pasteboard declareTypes:[NSArray arrayWithObjects:NSPDFPboardType, NSHTMLPboardType, nil] owner:nil];
+//   [pasteboard setData:[pdf dataRepresentation] forType:NSPDFPboardType];
+//   [pasteboard setData:[NSData dataWithBytes: SDATA (string) length:strlen(SDATA (string))] forType:NSHTMLPboardType];
+//   [pdf release];
+//   [htmlPage release];
+//   unblock_input();
+//   return Qnil;
+// }
+
+// DEFUN ("ns-popup-print-panel", Fns_popup_print_panel, Sns_popup_print_panel,
+//        0, 2, "",
+//        doc: /* Pop up the print panel.  */)
+//      (frame, source)
+//      Lisp_Object frame, source;
+// {
+//   struct frame *f;
+//   check_window_system (NULL);
+//   block_input();
+//   if (NILP (frame))
+//     f = SELECTED_FRAME ();
+//   else
+//     {
+//       CHECK_FRAME (frame);
+//       f = XFRAME (frame);
+//     }
+
+//   WKWebView *htmlPage = [[WKWebView alloc] initWithFrame:AQ_NSMakeRect(0,0,300,300)
+// 					   frameName:@"myFrame"
+// 					   groupName:@"myGroup"];
+
+
+//   if (STRINGP (source))
+//     {
+//       [[htmlPage mainFrame] loadRequest:[NSURLRequest requestWithURL:
+// 					      [NSURL fileURLWithPath:
+// 						       [NSString stringWithUTF8String: SDATA (source) ]]]];
+//     }
+//   else if (BUFFERP (source))
+//     {
+//       struct buffer *old_buffer = NULL;
+//       if (XBUFFER (source) != current_buffer)
+// 	{
+// 	  old_buffer = current_buffer;
+// 	  set_buffer_internal_1 (XBUFFER (source));
+// 	}
+//       Lisp_Object string = make_buffer_string (BEGV, ZV, 0);
+//       if (old_buffer)
+// 	  set_buffer_internal_1 (old_buffer);
+
+//       [[htmlPage mainFrame] loadHTMLString:
+// 	    [NSString stringWithUTF8String: SDATA (string)] /* is copied */
+// 				   baseURL:[NSURL fileURLWithPath: [[NSBundle mainBundle] resourcePath]]];
+//     }
+//   else
+//     {
+//       unblock_input();
+//       error ("Must give buffer or file path as source for ns-popup-print-panel.");
+//     }
+
+//   /*
+
+//     works for PDF:
+
+//   PDFView *pdfView = [[[PDFView alloc] init] retain];
+//   PDFDocument *pdfDoc = [[[PDFDocument alloc] initWithURL: [NSURL fileURLWithPath:
+// 								    [NSString stringWithUTF8String: SDATA (pdf_file) ]]] retain];
+
+//   if (pdfDoc == NULL)
+//     {
+//       [pdfView release];
+//       error("Could not load PDF file.");
+//     }
+
+
+//   [pdfView setDocument: pdfDoc];
+//   [pdfView setDisplayMode: kPDFDisplaySinglePageContinuous];
+//   [pdfView layoutDocumentView];
+
+//   [FRAME_NS_VIEW(f) addSubview:pdfView];
+//   // this seems to have problems with the run loop or something
+//   [pdfView printWithInfo:[NSPrintInfo sharedPrintInfo] autoRotate:NO];
+
+// */
+
+//   /* call back when finished loading.
+//      delegate implemented in nsterm.m */
+//   [htmlPage setFrameLoadDelegate:FRAME_NS_VIEW (f)];
+
+//   unblock_input();
+//   return Qnil;
+// }
+
+
+Lisp_Object save_panel_callback;
+DEFUN ("ns-popup-save-panel", Fns_popup_save_panel, Sns_popup_save_panel,
+       0, 3, "",
+       doc: /* Pop up the save panel as a sheet over the current buffer.
+Upon completion, the event `ns-save-panel-closed' will be sent,
+with the variable `ns-save-panel-file' containing the selected file
+(nil if cancelled), and `ns-save-panel-buffer' the buffer current
+when `ns-popup-save-panel' was called.
+*/)
+     (prompt, dir, init)
+     Lisp_Object prompt, dir, init;
+{
+  NSSavePanel *panel;
+
+  check_window_system (NULL);
+  block_input();
+
+  NSString *promptS = NILP (prompt) || !STRINGP (prompt) ? nil :
+    [NSString stringWithUTF8String: SDATA (prompt)];
+  NSString *dirS = NILP (dir) || !STRINGP (dir) ?
+    [NSString stringWithUTF8String: SDATA (BVAR (current_buffer, directory))] :
+    [NSString stringWithUTF8String: SDATA (dir)];
+  NSString *initS = NILP (init) || !STRINGP (init) ? nil :
+    [NSString stringWithUTF8String: SDATA (init)];
+
+
+  if ([dirS characterAtIndex: 0] == '~')
+    dirS = [dirS stringByExpandingTildeInPath];
+
+  panel = [EmacsSavePanel savePanel];
+
+  [panel setTitle: promptS];
+
+  [panel setTreatsFilePackagesAsDirectories: YES];
+  [panel setCanSelectHiddenExtension:NO];
+  [panel setExtensionHidden:NO];
+
+  if (dirS) [panel setDirectoryURL: [NSURL fileURLWithPath: dirS]];
+  if (initS) [panel setNameFieldStringValue: [initS lastPathComponent]];
+
+  [panel beginSheetModalForWindow:[FRAME_NS_VIEW (SELECTED_FRAME ()) window]
+		completionHandler:
+	   ^(NSInteger result) {
+      [((EmacsApp *) NSApp) savePanelDidEnd2: panel returnCode:result contextInfo:current_buffer];
+
+    }];
+    // to do: move code from savePanelDidEnd2 here
+
+  set_frame_menubar (SELECTED_FRAME (),  false);
+  unblock_input();
+  return Qnil;
+}
+
+
+
 /* ==========================================================================
 
     Lisp interface declaration
@@ -4710,6 +5029,16 @@ Default is t.  */);
   defsubr (&Sns_open_help_anchor);
 
   defsubr (&Sx_select_font);
+
+  defsubr (&Sns_popup_save_panel);
+  // defsubr (&Sns_popup_print_panel);
+  defsubr (&Sns_popup_page_setup_panel);
+
+  //  defsubr (&Saquamacs_render_to_pdf);
+  defsubr (&Saquamacs_html_to_rtf);
+
+
+
 
 
   defsubr (&Sx_show_tip);
